@@ -1,4 +1,6 @@
-global._taroMapMap = {}
+const globalAny:any = global;
+
+globalAny._taroMapMap = {}
 
 class MapContext {
   private mapRef
@@ -57,8 +59,8 @@ class MapContext {
  * {string} @param - id map 组件的 id
  * {object} @param t - 在自定义组件下，当前组件实例的this，以操作组件内 map 组件
  */
-export function createVideoContext (id: string, t: object) {
-  const ref = global._taroMapMap[id]
+export function createMapContext (id: string, t: object) {
+  const ref = globalAny._taroMapMap[id]
   if (ref) {
     return new MapContext(ref)
   } else {

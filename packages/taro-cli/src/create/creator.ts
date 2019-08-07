@@ -65,7 +65,6 @@ export default class Creator {
     if (!fs.existsSync(this._rootPath)) {
       fs.ensureDirSync(this._rootPath)
     }
-    console.log('this._rootPath: ', this._rootPath)
     return this._rootPath
   }
 
@@ -102,8 +101,12 @@ export default class Creator {
       data = dest
       dest = source
     }
+
+    const src = this.templatePath(template, source)
+    if (!fs.existsSync(src)) return
+
     this.fs.copyTpl(
-      this.templatePath(template, source),
+      src,
       this.destinationPath(dest),
       Object.assign({ _ }, this, data),
       options

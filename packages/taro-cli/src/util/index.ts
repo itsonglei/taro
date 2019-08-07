@@ -496,7 +496,7 @@ export function copyFiles (appPath: string, copyConfig: ICopyOptions | void) {
 }
 
 export function isQuickappPkg (name: string, quickappPkgs: any[] = []): boolean {
-  const isQuickappPkg = /^@[a-zA-Z]{1,}\.[a-zA-Z]{1,}/.test(name)
+  const isQuickappPkg = /^@(system|service)\.[a-zA-Z]{1,}/.test(name)
   let hasSetInManifest = false
   quickappPkgs.forEach(item => {
     if (item.name === name.replace(/^@/, '')) {
@@ -678,17 +678,15 @@ export const getAllFilesInFloder = async (
   filter: string[] = []
 ): Promise<string[]> => {
   let files: string[] = []
-  const list = await ((fs.readdir(floder, {
-    withFileTypes: true
-  } as any) as any) as Promise<fs.Dirent[]>)
+  const list = readDirWithFileTypes(floder)
 
   await Promise.all(
     list.map(async item => {
       const itemPath = path.join(floder, item.name)
-      if (item.isDirectory()) {
+      if (item.isDirectory) {
         const _files = await getAllFilesInFloder(itemPath, filter)
         files = [...files, ..._files]
-      } else if (item.isFile()) {
+      } else if (item.isFile) {
         if (!filter.find(rule => rule === item.name)) files.push(itemPath)
       }
     })
@@ -723,9 +721,28 @@ export function getUserHomeDir (): string {
 export type TemplateSourceType = 'git' | 'url'
 
 export function getTemplateSourceType (url: string): TemplateSourceType {
-  if (/^git@/.test(url) || /^(https|http):\/\/git/.test(url)) {
+  if (/^github:/.test(url) || /^gitlab:/.test(url)) {
     return 'git'
   } else {
     return 'url'
   }
+}
+
+interface FileStat {
+  name: string
+  isDirectory: boolean
+  isFile: boolean
+}
+
+export function readDirWithFileTypes (floder: string): FileStat[] {
+  const list = fs.readdirSync(floder)
+  const res = list.map(name => {
+    const stat =fs.statSync(path.join(floder, name))
+    return {
+      name,
+      isDirectory: stat.isDirectory(),
+      isFile: stat.isFile()
+    }
+  })
+  return res
 }
