@@ -35,7 +35,9 @@ import {
   PROPS_MANAGER,
   GEN_COMP_ID,
   GEN_LOOP_COMPID,
-  CONTEXT_PROVIDER
+  CONTEXT_PROVIDER,
+  setIsTaroReady,
+  setCompId
 } from './constant'
 import { Adapters, setAdapter, Adapter } from './adapter'
 import { Options, setTransformOptions, buildBabelTransformOptions } from './options'
@@ -213,6 +215,10 @@ export default function transform (options: Options): TransformResult {
     setLoopOriginal('privateOriginal')
     setLoopCallee('anonymousCallee_')
     setLoopState('loopState')
+  }
+  if (Adapter.type === Adapters.quickapp) {
+    setIsTaroReady('priTaroCompReady')
+    setCompId('priCompid')
   }
   THIRD_PARTY_COMPONENTS.clear()
   const code = options.isTyped
@@ -505,7 +511,7 @@ export default function transform (options: Options): TransformResult {
 
       const forStatement = path.findParent(isForStatement)
       if (isForStatement(forStatement)) {
-        throw codeFrameError(forStatement.node, '不行使用 for 循环操作 JSX 元素，详情：https://github.com/NervJS/taro/blob/master/packages/eslint-plugin-taro/docs/manipulate-jsx-as-array.md')
+        throw codeFrameError(forStatement.node, '不能使用 for 循环操作 JSX 元素，详情：https://github.com/NervJS/taro/blob/master/packages/eslint-plugin-taro/docs/manipulate-jsx-as-array.md')
       }
 
       const loopCallExpr = path.findParent(p => isArrayMapCallExpression(p))
@@ -522,15 +528,20 @@ export default function transform (options: Options): TransformResult {
     JSXOpeningElement (path) {
       const { name } = path.node.name as t.JSXIdentifier
       const binding = path.scope.getBinding(name)
-      if (process.env.NODE_ENV !== 'test' && DEFAULT_Component_SET.has(name) && binding && binding.kind === 'module') {
+      if (process.env.NODE_ENV !== 'test' && binding && binding.kind === 'module') {
         const bindingPath = binding.path
         if (bindingPath.parentPath.isImportDeclaration()) {
           const source = bindingPath.parentPath.node.source
-          if (source.value !== COMPONENTS_PACKAGE_NAME) {
+          if (DEFAULT_Component_SET.has(name) && source.value !== COMPONENTS_PACKAGE_NAME) {
             throw codeFrameError(bindingPath.parentPath.node, `内置组件名: '${name}' 只能从 ${COMPONENTS_PACKAGE_NAME} 引入。`)
+          }
+
+          if (name === 'Fragment') {
+            path.node.name = t.jSXIdentifier('block')
           }
         }
       }
+
       if (Adapter.type === Adapters.quickapp) {
         if (name === 'View') {
           path.node.name = t.jSXIdentifier('div')

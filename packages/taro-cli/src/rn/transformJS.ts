@@ -46,6 +46,16 @@ const PACKAGES = {
 }
 
 const additionalConstructorNode = toAst(`Taro._$app = this`)
+const superNode = t.expressionStatement(
+  t.callExpression(
+    // @ts-ignore
+    t.super(),
+    [
+      t.identifier('props'),
+      t.identifier('context')
+    ]
+  )
+)
 
 function getInitPxTransformNode (projectConfig) {
   const pxTransformConfig = {designWidth: projectConfig.designWidth || 750}
@@ -236,6 +246,19 @@ export function parseJSCode ({code, filePath, isEntryFile, projectConfig}) {
   traverse(ast, {
     ClassExpression: ClassDeclarationOrExpression,
     ClassDeclaration: ClassDeclarationOrExpression,
+    ExpressionStatement (astPath) {
+      const node = astPath.node as t.ExpressionStatement
+      const expression = node.expression as t.CallExpression
+      const callee = expression.callee as t.Identifier
+      if (callee && callee.name === 'require') {
+        const argument = expression.arguments[0] as t.StringLiteral
+        const value = argument.value
+        const valueExtname = path.extname(value)
+        if (REG_STYLE.test(valueExtname)) {
+          astPath.replaceWith(t.importDeclaration([], t.stringLiteral(value)))
+        }
+      }
+    },
     ImportDeclaration (astPath) {
       const node = astPath.node as t.ImportDeclaration
       const source = node.source
@@ -262,13 +285,13 @@ export function parseJSCode ({code, filePath, isEntryFile, projectConfig}) {
           // if (pathArr.indexOf('pages') >= 0) {
           //   astPath.remove()
           // } else
-           if (REG_SCRIPTS.test(value) || path.extname(value) === '') {
-             const absolutePath = path.resolve(filePath, '..', value)
-             const dirname = path.dirname(absolutePath)
-             const extname = path.extname(absolutePath)
-             const realFilePath = Util.resolveScriptPath(path.join(dirname, path.basename(absolutePath, extname)))
-             const removeExtPath = realFilePath.replace(path.extname(realFilePath), '')
-             node.source = t.stringLiteral(Util.promoteRelativePath(path.relative(filePath, removeExtPath)).replace(/\\/g, '/'))
+          if (REG_SCRIPTS.test(value) || path.extname(value) === '') {
+            const absolutePath = path.resolve(filePath, '..', value)
+            const dirname = path.dirname(absolutePath)
+            const extname = path.extname(absolutePath)
+            const realFilePath = Util.resolveScriptPath(path.join(dirname, path.basename(absolutePath, extname)))
+            const removeExtPath = realFilePath.replace(path.extname(realFilePath), '')
+            node.source = t.stringLiteral(Util.promoteRelativePath(path.relative(filePath, removeExtPath)).replace(/\\/g, '/'))
           }
         }
         return
@@ -471,9 +494,16 @@ export function parseJSCode ({code, filePath, isEntryFile, projectConfig}) {
                   ]), false, false))
               }
               if (!hasConstructor) {
-                node.body.unshift(t.classMethod(
-                  'method', t.identifier('constructor'), [t.identifier('props'), t.identifier('context')],
-                  t.blockStatement([toAst('super(props, context)'), additionalConstructorNode] as t.Statement[]), false, false))
+                node.body.unshift(
+                  t.classMethod(
+                    'constructor',
+                    t.identifier('constructor'),
+                    [t.identifier('props'), t.identifier('context')],
+                    t.blockStatement([superNode, additionalConstructorNode] as t.Statement[]),
+                    false,
+                    false
+                  )
+                )
               }
             }
           },
@@ -593,15 +623,20 @@ export function parseJSCode ({code, filePath, isEntryFile, projectConfig}) {
       'process.env.TARO_ENV': BUILD_TYPES.RN
     }, Util.generateEnvList(projectConfig.env || {}), Util.generateConstantsList(projectConfig.defineConstants || {}))
     // TODO 使用 babel-plugin-transform-jsx-to-stylesheet 处理 JSX 里面样式的处理，删除无效的样式引入待优化
-    ast = babel.transformFromAst(ast, code, {
-      plugins: [
-        [require('babel-plugin-transform-jsx-to-stylesheet'), {filePath}],
-        require('babel-plugin-transform-decorators-legacy').default,
-        require('babel-plugin-transform-class-properties'),
-        [require('babel-plugin-danger-remove-unused-import'), {ignore: ['@tarojs/taro', 'react', 'react-native', 'nervjs']}],
-        [require('babel-plugin-transform-define').default, constantsReplaceList]
-      ]
-    }).ast
+
+    const plugins = [
+      [require('babel-plugin-transform-jsx-to-stylesheet'), {filePath}],
+      require('babel-plugin-transform-class-properties'),
+      require('babel-plugin-transform-decorators-legacy').default,
+      [require('babel-plugin-danger-remove-unused-import'), {ignore: ['@tarojs/taro', 'react', 'react-native', 'nervjs']}],
+      [require('babel-plugin-transform-define').default, constantsReplaceList]
+    ]
+
+    // const babelConfig = projectConfig.plugins.babel
+    // const plugins = babelConfig.plugins.concat(extraBabelPlugins)
+    const newBabelConfig = Object.assign({}, {plugins})
+
+    ast = babel.transformFromAst(ast, code, newBabelConfig).ast
   } catch (e) {
     throw e
   }

@@ -1,11 +1,21 @@
+import Taro from '@tarojs/taro-h5'
+import invariant from 'invariant'
+import rp from 'resolve-pathname'
+
+import { stripLeadingSlash, stripTrailingSlash } from '../history/PathUtils'
 import { History } from '../utils/types'
-import invariant from 'invariant';
-import Taro from '@tarojs/taro-h5';
 
 type SuccessCallback = (res: any) => any
 type FailCallback = (err: any) => any
 type CompleteCallback = () => any
-type Result = { errMsg?: string }
+
+type CustomRoutes = Record<string, string>
+
+interface RouterConfig {
+  customRoutes: CustomRoutes
+  basename: string
+  currentPagename: string
+}
 
 interface NavigateToOption {
   url: string
@@ -28,16 +38,41 @@ interface RedirectToOption {
   complete?: CompleteCallback
 }
 
-const createNavigateTo = (history: History) => {
-  return function ({ url }: NavigateToOption): Promise<Result> {
-    const res: Result = {}
+let basename = ''
+let currentPagename = ''
+
+const relaunchUrlKey = '__relaunchUrl'
+
+const addHtmlExtname = (str: string) => {
+  return /\.html\b/.test(str)
+    ? str
+    : `${str}.html`
+}
+
+const getTargetUrl = (url: string, customRoutes: CustomRoutes) => {
+  const matched = url.match(/([\s\S]*)(\?[\s\S]*)?/) || []
+  const pathname = matched[1] || ''
+  const search = matched[2] || ''
+
+  const targetUrl = rp(pathname, currentPagename)
+  const nextPagename = addHtmlExtname(stripLeadingSlash(customRoutes[targetUrl] || targetUrl))
+  return `${basename}/${nextPagename}${search}`
+}
+
+const createNavigateTo = ({ customRoutes }: RouterConfig, history?: History) => {
+  return function ({ url }: NavigateToOption): Promise<Taro.General.CallbackResult> {
+    const res: Taro.General.CallbackResult = {
+      errMsg: ''
+    }
 
     try {
       invariant(url, 'navigateTo must be called with a url')
       if (/^(https?:)\/\//.test(url)) {
         window.location.assign(url)
-      } else {
+      } else if (history) {
         history.push(url)
+      } else {
+        window.location.assign(getTargetUrl(url, customRoutes))
       }
       res.errMsg = 'navigateTo:ok'
       return Promise.resolve(res)
@@ -48,14 +83,20 @@ const createNavigateTo = (history: History) => {
   }
 }
 
-const createNavigateBack = (history: History) => {
-  return function (opts: NavigateBackOption = {}) {
-    const res: Result = {}
+const createNavigateBack = ({ customRoutes }: RouterConfig, history?: History) => {
+  return function (opts: NavigateBackOption = {}): Promise<Taro.General.CallbackResult> {
+    const res: Taro.General.CallbackResult = {
+      errMsg: ''
+    }
     try {
       const { delta = 1 } = opts
       invariant(delta >= 0, 'navigateBack must be called with a delta greater than 0')
+      if (history) {
+        history.go(-delta)
+      } else {
+        window.history.go(-delta)
+      }
 
-      history.go(-delta)
       res.errMsg = 'navigateBack:ok'
       return Promise.resolve(res)
     } catch (e) {
@@ -65,17 +106,21 @@ const createNavigateBack = (history: History) => {
   }
 }
 
-const createRedirectTo = (history: History) => {
-  return function ({ url }: RedirectToOption) {
-    const res: Result = {}
-    
+const createRedirectTo = ({ customRoutes }: RouterConfig, history?: History) => {
+  return function ({ url }: RedirectToOption): Promise<Taro.General.CallbackResult> {
+    const res: Taro.General.CallbackResult = {
+      errMsg: ''
+    }
+
     try {
       invariant(url, 'redirectTo must be called with a url')
 
       if (/^(https?:)\/\//.test(url)) {
         window.location.assign(url);
-      } else {
+      } if (history) {
         history.replace(url)
+      } else {
+        window.location.replace(getTargetUrl(url, customRoutes))
       }
       res.errMsg = 'redirectTo:ok'
       return Promise.resolve(res)
@@ -86,15 +131,31 @@ const createRedirectTo = (history: History) => {
   }
 }
 
-const createReLaunch = (history: History) => {
-  return function ({ url }) {
-    const res: Result = {}
+const createReLaunch = ({ customRoutes }: RouterConfig, history?: History) => {
+  try {
+    const relaunchUrl = localStorage.getItem(relaunchUrlKey)
+    if (relaunchUrl) {
+      localStorage.setItem(relaunchUrlKey, '')
+      location.replace(relaunchUrl)
+    }
+  } catch (e) {
+    console.log(e.message)
+  }
+  return function ({ url }): Promise<Taro.General.CallbackResult> {
+    const res: Taro.General.CallbackResult = {
+      errMsg: ''
+    }
     try {
-      history.go(-(history.length - 1))
-      if (/^(https?:)\/\//.test(url)) {
-        window.location.assign(url);
+      if (history) {
+        history.go(-(history.length - 1))
+        if (/^(https?:)\/\//.test(url)) {
+          window.location.assign(url);
+        } else {
+          history.replace(url)
+        }
       } else {
-        history.replace(url)
+        localStorage.setItem(relaunchUrlKey, getTargetUrl(url, customRoutes))
+        window.history.go(-(window.history.length - 1))
       }
       res.errMsg = 'reLaunch:ok'
       return Promise.resolve(res)
@@ -105,11 +166,13 @@ const createReLaunch = (history: History) => {
   }
 }
 
-const mountApis = (history: History) => {
-  Taro.navigateTo = createNavigateTo(history)
-  Taro.navigateBack = createNavigateBack(history)
-  Taro.redirectTo = createRedirectTo(history)
-  Taro.reLaunch = createReLaunch(history)
+const mountApis = (routerConfig: RouterConfig, history?: History) => {
+  currentPagename = routerConfig.currentPagename
+  basename = stripTrailingSlash(routerConfig.basename)
+  Taro.navigateTo = createNavigateTo(routerConfig, history)
+  Taro.navigateBack = createNavigateBack(routerConfig, history)
+  Taro.redirectTo = createRedirectTo(routerConfig, history)
+  Taro.reLaunch = createReLaunch(routerConfig, history)
 }
 
 export default mountApis

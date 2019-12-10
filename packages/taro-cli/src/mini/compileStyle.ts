@@ -4,6 +4,7 @@ import * as path from 'path'
 import * as autoprefixer from 'autoprefixer'
 import * as postcss from 'postcss'
 import * as pxtransform from 'postcss-pxtransform'
+import rewriter from '../quickapp/style-rewriter'
 import getHashName from '../util/hash'
 import browserList from '../config/browser_list'
 import {
@@ -106,7 +107,7 @@ export async function processStyleUseCssModule (styleObj: IStyleObj): Promise<an
 }
 
 async function processStyleWithPostCSS (styleObj: IStyleObj): Promise<string> {
-  const { appPath, projectConfig, npmConfig, isProduction, buildAdapter } = getBuildData()
+  const { appPath, outputDir,projectConfig, npmConfig, isProduction, buildAdapter } = getBuildData()
   const weappConf = Object.assign({}, projectConfig.weapp)
   const publicPath = weappConf.publicPath
   const useModuleConf = weappConf.module || {}
@@ -163,14 +164,33 @@ async function processStyleWithPostCSS (styleObj: IStyleObj): Promise<string> {
       }
     }
 
+
+
+    /***
+     * 修复小程序下css没有正确引用样式
+     * 当前位置只进行了文件hash转换并没有做文件copy操作
+     */
     if (publicPath && typeof url !== 'function') {
       customUrlConf.config.url = (assets) => {
+
+        // 本地文件路径
         if (/\./.test(assets.url)) {
-          const hashName = getHashName(assets.absolutePath)
-          assets.url = (/\/$/.test(publicPath) ? publicPath : publicPath + '/') + hashName
+          const hashName = getHashName(assets.absolutePath);
+          assets.url = (/\/$/.test(publicPath) ? publicPath : publicPath + '/') + hashName;
+
+          // 目前只在头条小程序复现，避免影响，只针对头条处理
+          if(buildAdapter === BUILD_TYPES.TT){
+            const outputFile = path.resolve(outputDir,`./${assets.url}`);
+            fs.ensureDirSync(path.dirname(outputFile));
+            fs.copySync(assets.absolutePath,outputFile);
+            // 头条下不支持 / ，修正头条css background路径
+            assets.url = assets.url.replace(/^[\/]/,'');
+          }
         }
+
         return assets.url
       }
+
     }
 
     const cssUrlParseConf = {
@@ -272,7 +292,8 @@ export function compileDepStyles (outputFilePath: string, styleFiles: string[]) 
   if (isBuildingStyles.get(outputFilePath)) {
     return Promise.resolve({})
   }
-  const { appPath, projectConfig, isProduction } = getBuildData()
+  const { appPath, projectConfig, isProduction, buildAdapter } = getBuildData()
+  const isQuickApp = buildAdapter === BUILD_TYPES.QUICKAPP
   const pluginsConfig = projectConfig.plugins || {}
   isBuildingStyles.set(outputFilePath, true)
   return Promise.all(styleFiles.map(async p => compileStyleWithPlugin(p))).then(async resList => {
@@ -289,6 +310,13 @@ export function compileDepStyles (outputFilePath: string, styleFiles: string[]) 
           const cssoResult = callPluginSync('csso', resContent, outputFilePath, cssoConfig, appPath)
           resContent = cssoResult.css
         }
+        if (isQuickApp) {
+          const transformStyle = rewriter(resContent, isProduction)
+          if(transformStyle) {
+            resContent = transformStyle
+          }
+        }
+
         fs.ensureDirSync(path.dirname(outputFilePath))
         fs.writeFileSync(outputFilePath, resContent)
       })
