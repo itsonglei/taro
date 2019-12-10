@@ -1,9 +1,10 @@
 import { getCurrentPageUrl } from '@tarojs/utils'
 import { commitAttachRef, detachAllRef, Current, eventCenter } from '@tarojs/taro'
 import { isEmptyObject, isFunction, isArray } from './util'
-import { mountComponent } from './lifecycle'
+import { mountComponent, updateComponent } from './lifecycle'
 import { cacheDataSet, cacheDataGet, cacheDataHas } from './data-cache'
 import propsManager from './propsManager'
+import nextTick from './next-tick'
 
 const anonymousFnNamePreffix = 'funPrivate'
 const preloadPrivateKey = '__preload_'
@@ -22,8 +23,23 @@ function bindProperties (weappComponentConf, ComponentClass, isPage) {
   weappComponentConf.properties.compid = {
     type: null,
     value: null,
-    observer () {
+    observer (newVal, oldVal) {
       initComponent.apply(this, [ComponentClass, isPage])
+      if (oldVal && oldVal !== newVal) {
+        const { extraProps } = this.data
+        const component = this.$component
+        propsManager.observers[newVal] = {
+          component,
+          ComponentClass: component.constructor
+        }
+        const nextProps = filterProps(component.constructor.defaultProps, propsManager.map[newVal], component.props, extraProps || null)
+        this.$component.nextProps = nextProps
+        nextTick(() => {
+          this.$component._unsafeCallUpdate = true
+          updateComponent(this.$component)
+          this.$component._unsafeCallUpdate = false
+        })
+      }
     }
   }
 }
@@ -177,22 +193,25 @@ export function componentTrigger (component, key, args) {
 
     if (component['$$refs'] && component['$$refs'].length > 0) {
       let refs = {}
-      const refComponents = component['$$refs'].map(ref => new Promise((resolve, reject) => {
-        const query = tt.createSelectorQuery().in(component.$scope)
-        if (ref.type === 'component') {
-          component.$scope.selectComponent(`#${ref.id}`, target => {
+      const refComponents = []
+      component['$$refs'].forEach(ref => {
+        refComponents.push(new Promise((resolve, reject) => {
+          const query = tt.createSelectorQuery().in(component.$scope)
+          if (ref.type === 'component') {
+            component.$scope.selectComponent(`#${ref.id}`, target => {
+              resolve({
+                target: target ? target.$component || target : null,
+                ref
+              })
+            })
+          } else {
             resolve({
-              target: target.$component || target,
+              target: query.select(`#${ref.id}`),
               ref
             })
-          })
-        } else {
-          resolve({
-            target: query.select(`#${ref.id}`),
-            ref
-          })
-        }
-      }))
+          }
+        }))
+      })
       Promise.all(refComponents)
         .then(targets => {
           targets.forEach(({ ref, target }) => {
@@ -292,6 +311,7 @@ function createComponent (ComponentClass, isPage) {
       isPage && (hasPageInited = false)
       if (isPage && cacheDataHas(preloadInitedComponent)) {
         this.$component = cacheDataGet(preloadInitedComponent, true)
+        this.$component.$componentType = 'PAGE'
       } else {
         this.$component = new ComponentClass({}, isPage)
       }

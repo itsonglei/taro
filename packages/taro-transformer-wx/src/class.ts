@@ -125,6 +125,7 @@ class Transformer {
   private loopRefs: Map<t.JSXElement, LoopRef> = new Map()
   private anonymousFuncCounter = incrementId()
   private importJSXs = new Set<String>()
+  private refObjExpr: t.ObjectExpression[] = []
 
   constructor (
     path: NodePath<t.ClassDeclaration>,
@@ -169,7 +170,7 @@ class Transformer {
   }
 
   handleRefs () {
-    const objExpr = this.refs.map(ref => {
+    this.refObjExpr = this.refs.map(ref => {
       return t.objectExpression([
         t.objectProperty(
           t.identifier('type'),
@@ -190,26 +191,20 @@ class Transformer {
       ])
     })
 
-    if (isTestEnv) {
-      this.classPath.node.body.body.push(t.classProperty(
-        t.identifier('$$refs'),
-        t.arrayExpression(objExpr)
-      ))
-    }
-
     const _constructor = this.classPath.node.body.body.find(item => {
-      if (t.isClassMethod(item) && t.isIdentifier(item.key) && item.key.name === '_constructor') {
+      const constructorName = isTestEnv ? 'constructor' : '_constructor'
+      if (t.isClassMethod(item) && t.isIdentifier(item.key) && item.key.name === constructorName) {
         return true
       }
       return false
     })
 
-    if (_constructor && t.isClassMethod(_constructor)) {
+    if (_constructor && t.isClassMethod(_constructor) && Adapter.type !== Adapters.quickapp) {
       _constructor.body.body.push(
         t.expressionStatement(t.assignmentExpression(
           '=',
           t.memberExpression(t.thisExpression(), t.identifier('$$refs')),
-          t.arrayExpression(objExpr)
+          t.newExpression(t.memberExpression(t.identifier('Taro'), t.identifier('RefsArray')), [])
         ))
       )
     }
@@ -449,6 +444,26 @@ class Transformer {
                 fn: expr
               })
             }
+          } else if (t.isIdentifier(expr)) {
+            const type = DEFAULT_Component_SET.has(componentName) ? 'dom' : 'component'
+            const binding = path.scope.getBinding(expr.name)
+            const decl = t.expressionStatement(
+              t.assignmentExpression(
+                '=',
+                t.memberExpression(t.thisExpression(), expr),
+                expr
+              )
+            )
+            if (binding) {
+              binding.path.parentPath.insertAfter(decl)
+            } else {
+              path.getStatementParent().insertBefore(decl)
+            }
+            this.refs.push({
+              type,
+              id,
+              fn: t.memberExpression(t.thisExpression(), expr)
+            })
           } else {
             throw codeFrameError(refAttr, 'ref 仅支持传入字符串、匿名箭头函数和 class 中已声明的函数')
           }
@@ -641,7 +656,6 @@ class Transformer {
         const scope = renderMethod! && renderMethod!.scope || path.scope
         const calleeExpr = expression.get('callee')
         const parentPath = path.parentPath
-
         if (
           hasComplexExpression(expression) &&
           !isFunctionProp &&
@@ -651,8 +665,14 @@ class Transformer {
             calleeExpr.get('property').isIdentifier({ name: 'bind' })) // is not bind
         ) {
           const calleeName = calleeExpr.isIdentifier() && calleeExpr.node.name
-          if (typeof calleeName === 'string' && isDerivedFromProps(calleeExpr.scope, calleeName)) {
+          if (typeof calleeName === 'string' && calleeName.startsWith('render') && isDerivedFromProps(calleeExpr.scope, calleeName)) {
             return
+          }
+          if (calleeExpr.isMemberExpression() && isDerivedFromProps(calleeExpr.scope, findFirstIdentifierFromMemberExpression(calleeExpr.node).name)) {
+            const idName = findFirstIdentifierFromMemberExpression(calleeExpr.node).name
+            if (isDerivedFromProps(calleeExpr.scope, idName) && t.isIdentifier(calleeExpr.node.property) && calleeExpr.node.property.name.startsWith('render')) {
+              return
+            }
           }
           generateAnonymousState(scope, expression, jsxReferencedIdentifiers)
         } else {
@@ -725,7 +745,21 @@ class Transformer {
               parentPath.replaceWith(slot)
             }
           }
-          if (parentPath.isMemberExpression() && parentPath.isReferenced() && parentPath.parentPath.isJSXExpressionContainer()) {
+          if (parentPath.isMemberExpression() && parentPath.parentPath.isCallExpression()) {
+            if (isDerivedFromProps(path.scope, findFirstIdentifierFromMemberExpression(parentPath.node).name)) {
+              injectRenderPropsEmiter(parentPath.parentPath, path.node.name)
+              parentPath.parentPath.replaceWith(slot)
+            }
+          }
+          if (
+            parentPath.isMemberExpression() &&
+            parentPath.isReferenced() &&
+            (
+              parentPath.parentPath.isJSXExpressionContainer() ||
+              parentPath.parentPath.isLogicalExpression() ||
+              parentPath.parentPath.isConditionalExpression()
+            )
+          ) {
             const object = parentPath.get('object')
             if (object.isIdentifier()) {
               const objectName = object.node.name
@@ -1088,6 +1122,7 @@ class Transformer {
           this.customComponentNames,
           this.componentProperies,
           this.loopRefs,
+          this.refObjExpr,
           methodName
         ).outputTemplate + '\n'
       })

@@ -31,8 +31,11 @@ function inlineStyle (style) {
 }
 
 function setTransform (el, val) {
-  el.style.webkitTransform = val
   el.style.transform = val
+  el.style.OTransform = val
+  el.style.msTransform = val
+  el.style.MozTransform = val
+  el.style.WebkitTransform = val
 }
 
 function isFunction (obj) {
@@ -60,7 +63,11 @@ function serializeParams (params) {
     return ''
   }
   return Object.keys(params)
-    .map(key => (`${encodeURIComponent(key)}=${encodeURIComponent(params[key])}`)).join('&')
+    .map(key => (
+      `${encodeURIComponent(key)}=${typeof (params[key]) ==="object" ?
+        encodeURIComponent(JSON.stringify(params[key])):
+        encodeURIComponent(params[key])}`))
+    .join('&')
 }
 
 function temporarilyNotSupport (apiName) {

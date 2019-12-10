@@ -17,7 +17,7 @@ import { IBuildConfig } from './util/types'
 // import { Error } from 'tslint/lib/error'
 
 let isBuildingStyles = {}
-let styleDenpendencyTree = {}
+const styleDenpendencyTree = {}
 
 const depTree: {
   [key: string]: string[]
@@ -47,6 +47,7 @@ class Compiler {
   pluginsConfig
   rnConfig
   hasJDReactOutput: boolean
+  babelConfig: any
   // pxTransformConfig
   // pathAlias
 
@@ -60,6 +61,7 @@ class Compiler {
     this.entryBaseName = path.basename(this.entryFilePath, path.extname(this.entryFileName))
     this.pluginsConfig = this.projectConfig.plugins || {}
     this.rnConfig = this.projectConfig.rn || {}
+    this.babelConfig = this.projectConfig.plugins.babel // 用来配置 babel
 
     // 直接输出编译后代码到指定目录
     if (this.rnConfig.outPath) {
@@ -130,7 +132,7 @@ class Compiler {
     import {AppRegistry} from 'react-native';
     import App from './${this.entryBaseName}';
     import {name as appName} from './app.json';
-  
+
     AppRegistry.registerComponent(appName, () => App);`
 
     fs.writeFileSync(path.join(this.tempPath, 'index.js'), indexJsStr)
@@ -151,7 +153,7 @@ class Compiler {
     if (REG_STYLE.test(filePath)) {
       // do something
     } else if (REG_SCRIPTS.test(filePath)) {
-      if(/\.jsx(\?.*)?$/.test(filePath)){
+      if (/\.jsx(\?.*)?$/.test(filePath)) {
         distPath = distPath.replace(/\.jsx(\?.*)?$/, '.js')
       }
       if (REG_TYPESCRIPT.test(filePath)) {
@@ -184,28 +186,31 @@ class Compiler {
    */
   buildTemp () {
     return new Promise((resolve, reject) => {
-      const filePaths: string[] = [];
-      klaw(this.sourceDir)
-        .on('data', file => {
-          if (!file.stats.isDirectory()) {
-            filePaths.push(file.path);
-          }
-        })
-        .on('error', (err, item) => {
-          console.log(err.message)
-          console.log(item.path)
-        })
-        .on('end', () => {
-          Promise.all(filePaths.map(filePath => this.processFile(filePath)))
-          .then(() => {
-            if (!this.hasJDReactOutput) {
-              this.initProjectFile()
-              resolve()
-            } else {
-              resolve()
+      const filePaths: string[] = []
+      this.processFile(this.entryFilePath).then(() => {
+        klaw(this.sourceDir)
+            .on('data', file => {
+            if (!file.stats.isDirectory()) {
+                filePaths.push(file.path);
             }
-          })
         })
+            .on('error', (err, item) => {
+            console.log(err.message);
+            console.log(item.path);
+        })
+            .on('end', () => {
+            Promise.all(filePaths.filter(f => f !== this.entryFilePath).map(filePath => this.processFile(filePath)))
+                .then(() => {
+                if (!this.hasJDReactOutput) {
+                    this.initProjectFile();
+                    resolve();
+                }
+                else {
+                    resolve();
+                }
+            });
+        });
+      })
     })
   }
 
@@ -341,8 +346,9 @@ function installDep (path: string) {
 export { Compiler }
 
 export async function build (appPath: string, buildConfig: IBuildConfig) {
-  const {watch} = buildConfig
+  const { watch } = buildConfig
   process.env.TARO_ENV = BUILD_TYPES.RN
+  await Util.checkCliAndFrameworkVersion(appPath, BUILD_TYPES.RN)
   const compiler = new Compiler(appPath)
   fs.ensureDirSync(compiler.tempPath)
   const t0 = performance.now()
@@ -357,7 +363,8 @@ export async function build (appPath: string, buildConfig: IBuildConfig) {
   }
   const t1 = performance.now()
   Util.printLog(processTypeEnum.COMPILE, `编译完成，花费${Math.round(t1 - t0)} ms`)
-
+  // rn 配置添加onlyTaroToRn字段,支持项目构建只编译不打包
+  if(compiler.rnConfig.onlyTaroToRn)return;
   if (watch) {
     compiler.watchFiles()
     if (!compiler.hasJDReactOutput) {

@@ -43,16 +43,17 @@ sidebar_label: ScrollView
 ###### 示例：
 ```jsx
 import Taro, { Component } from '@tarojs/taro'
-import { ScrollView } from '@tarojs/components'
+import { ScrollView, View } from '@tarojs/components'
 
 export default class PageView extends Component {
   constructor() {
     super(...arguments)
   }
   
-  onScrollToUpper(e){
-    console.log(e.detail)
-  }
+  onScrollToUpper() {}
+  
+  // or 使用箭头函数
+  // onScrollToUpper = () => {}
   
   onScroll(e){
     console.log(e.detail)
@@ -66,15 +67,15 @@ export default class PageView extends Component {
     const Threshold = 20
     const vStyleA = {
       height: '150px',
-      'background-color': rgb(26, 173, 25)
+      'background-color': 'rgb(26, 173, 25)'
     }
     const vStyleB = {
        height: '150px',
-      'background-color': rgb(39,130,215)
+      'background-color': 'rgb(39,130,215)'
     }
     const vStyleC = {
       height: '150px',
-      'background-color': rgb(241,241,241),
+      'background-color': 'rgb(241,241,241)',
       color: '#333'
     }
     return (
@@ -86,7 +87,7 @@ export default class PageView extends Component {
         style={scrollStyle}
         lowerThreshold={Threshold}
         upperThreshold={Threshold}
-        onScrollToUpper={this.onScrollToUpper}
+        onScrollToUpper={this.onScrollToUpper.bind(this)} // 使用箭头函数的时候 可以这样写 `onScrollToUpper={this.onScrollToUpper}`
         onScroll={this.onScroll}
       >
         <View style={vStyleA}>A</View>

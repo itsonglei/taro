@@ -50,7 +50,9 @@ export interface IBuildConfig {
   platform?: string,
   port?: number,
   release?: boolean,
-  buildVersion?: string
+  page?: string,
+  component?: string,
+  uiIndex?: string
 }
 
 export interface IMiniAppBuildConfig {
@@ -58,7 +60,9 @@ export interface IMiniAppBuildConfig {
   watch?: boolean,
   envHasBeenSet?: boolean,
   port?: number,
-  release?: boolean
+  release?: boolean,
+  page?: string,
+  component?: string
 }
 
 export interface IOption {
@@ -69,7 +73,8 @@ export interface ICopyOptions {
   patterns: {
     from: string,
     to: string,
-    ignore?: string[]
+    ignore?: string[],
+    watch?: boolean
   }[],
   options: {
     ignore?: string[]
@@ -134,6 +139,14 @@ export type TogglableOptions<T = IOption> = {
   config?: T
 }
 
+export interface IH5RouterConfig {
+  mode?: 'hash' | 'browser' | 'multi',
+  customRoutes?: IOption,
+  basename?: string,
+  lazyload?: boolean | ((pagename: string) => boolean)
+  renamePagename?: (pagename: string) => string
+}
+
 export interface IH5Config {
   webpack: ((webpackConfig: webpack.Configuration, webpack) => webpack.Configuration) | webpack.Configuration,
   webpackChain: (chain: any, webpack: any) => void,
@@ -142,14 +155,12 @@ export interface IH5Config {
   alias: IOption,
   entry: webpack.Entry,
   output: webpack.Output,
-  router?: {
-    mode?: 'hash' | 'browser',
-    custouRoutes?: IOption
-  },
+  router?: IH5RouterConfig,
   devServer: webpackDevServer.Configuration,
   enableSourceMap: boolean,
   enableExtract: boolean,
   enableDll: boolean,
+  transformOnly: boolean,
 
   cssLoaderOption: IOption,
   styleLoaderOption: IOption,
@@ -327,14 +338,16 @@ export interface IManifestConfig extends ITaroManifestConfig {
   display?: IDisplayConfig
 }
 
+export interface IDeviceRatio {
+  [key: string]: number
+}
+
 export interface IProjectConfig {
   projectName?: string,
   date?: string,
   designWidth?: number,
   watcher?: [],
-  deviceRatio?: {
-    [key: string]: number
-  },
+  deviceRatio?: IDeviceRatio,
   sourceRoot?: string,
   outputRoot?: string,
   plugins?: {
